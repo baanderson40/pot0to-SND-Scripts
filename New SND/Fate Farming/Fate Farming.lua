@@ -1,7 +1,7 @@
 --[=====[
 [[SND Metadata]]
 author: pot0to
-version: 3.0.9
+version: 3.0.10
 description: >-
   Fate farming script with the following features:
 
@@ -138,6 +138,9 @@ configs:
 *                                  Changelog                                   *
 ********************************************************************************
 
+    -> 3.0.10   By baanderson40 -
+                Rewrote the Ready function for Character State changes.
+                Fixed Bicolor Gem purchasing
     -> 3.0.9    By Allison.
                 Fix standing in place after fate finishes bug.
                 Add config options for Rotation Plugin and Dodging Plugin (Fixed bug when multiple solvers present at once)
@@ -2530,66 +2533,72 @@ function Ready()
     local needsRepair = Inventory.GetItemsInNeedOfRepairs(RemainingDurabilityToRepair)
     local spiritbonded = Inventory.GetSpiritbondedItems()
 
-    NextFate = SelectNextFate()
-    if CurrentFate ~= nil and not IsFateActive(CurrentFate.fateObject) then
-        CurrentFate = nil
+-- GemAnnouncement
+    Dalamud.Log("[FATE] Ready -> GemAnnouncement")
+	if not GemAnnouncementLock and (Echo == "All" or Echo == "Gems") then
+        GemAnnouncementLock = true
+        if BicolorGemCount >= 1400 then
+            yield("/echo [FATE] You're almost capped with "..tostring(BicolorGemCount).."/1500 gems! <se.3>")
+--BicolorExchangeData
+            if ShouldExchangeBicolorGemstones and (BicolorGemCount >= 1400) and not shouldWaitForBonusBuff and Player.IsLevelSynced ~= true then
+                Dalamud.Log("[FATE] Ready -> ExchangingVouchers")
+                State = CharacterState.exchangingVouchers
+                Dalamud.Log("[FATE] State Change: ExchangingVouchers")
+                return
+            else
+            Dalamud.Log("[FATE] Waiting for fate rewards: "..WaitingForFateRewards.fateId)
+            end	
+        else
+            yield("/echo [FATE] Gems: "..tostring(BicolorGemCount).."/1500")
+        end
     end
-
-    if CurrentFate == nil then
-        Dalamud.Log("[FATE] CurrentFate is nil")
-    else
-        Dalamud.Log("[FATE] CurrentFate is "..CurrentFate.fateName)
-    end
-
-    if NextFate == nil then
-        Dalamud.Log("[FATE] NextFate is nil")
-    else
-        Dalamud.Log("[FATE] NextFate is "..NextFate.fateName)
-    end
-
-    if not Dalamud.Log("[FATE] Ready -> Player.Available") and not Player.Available then
-        return
-    elseif not Dalamud.Log("[FATE] Ready -> Repair") and RemainingDurabilityToRepair > 0 and needsRepair.Count > 0 and
+	
+--Repair
+    if not Dalamud.Log("[FATE] Ready -> Repair") and RemainingDurabilityToRepair > 0 and needsRepair.Count > 0 and
         (not shouldWaitForBonusBuff or (SelfRepair and Inventory.GetItemCount(33916) > 0)) then
         State = CharacterState.repair
         Dalamud.Log("[FATE] State Change: Repair")
-    elseif not Dalamud.Log("[FATE] Ready -> ExtractMateria") and ShouldExtractMateria and spiritbonded.Count > 0 and Inventory.GetFreeInventorySlots() > 1 then
+        return
+	end
+	
+--Extract Materia
+    if not Dalamud.Log("[FATE] Ready -> ExtractMateria") and ShouldExtractMateria and spiritbonded.Count > 0 and Inventory.GetFreeInventorySlots() > 1 then
         State = CharacterState.extractMateria
         Dalamud.Log("[FATE] State Change: ExtractMateria")
-    elseif (not Dalamud.Log("[FATE] Ready -> WaitBonusBuff") and NextFate == nil and shouldWaitForBonusBuff) and DownTimeWaitAtNearestAetheryte then
-        if Svc.Targets.Target == nil or GetTargetName() ~= "aetheryte" or GetDistanceToTarget() > 20 then
-            State = CharacterState.flyBackToAetheryte
-            Dalamud.Log("[FATE] State Change: FlyBackToAetheryte")
-        else
-            yield("/wait 10")
-        end
         return
-    elseif not Dalamud.Log("[FATE] Ready -> ExchangingVouchers") and
-        ShouldExchangeBicolorGemstones and (BicolorGemCount >= 1400) and not shouldWaitForBonusBuff
-    then
-        if WaitingForFateRewards == nil then
-            State = CharacterState.exchangingVouchers
-            Dalamud.Log("[FATE] State Change: ExchangingVouchers")
-        else
-            Dalamud.Log("[FATE] Waiting for fate rewards: "..WaitingForFateRewards.fateId)
-        end
-    elseif not Dalamud.Log("[FATE] Ready -> ProcessRetainers") and WaitingForFateRewards == nil and
-        Retainers and ARRetainersWaitingToBeProcessed() and Inventory.GetFreeInventorySlots() > 1  and not shouldWaitForBonusBuff
-    then
+	end
+
+--ProcessRetainers
+    if not Dalamud.Log("[FATE] Ready -> ProcessRetainers") and WaitingForFateRewards == nil and
+        Retainers and ARRetainersWaitingToBeProcessed() and Inventory.GetFreeInventorySlots() > 1  and not shouldWaitForBonusBuff then
         State = CharacterState.processRetainers
         Dalamud.Log("[FATE] State Change: ProcessingRetainers")
-    elseif not Dalamud.Log("[FATE] Ready -> GC TurnIn") and ShouldGrandCompanyTurnIn and
-        Inventory.GetFreeInventorySlots() < InventorySlotsLeft and not shouldWaitForBonusBuff
-    then
+        return
+	end
+	
+--GrandCompanyTurnIn
+    if not Dalamud.Log("[FATE] Ready -> GC TurnIn") and ShouldGrandCompanyTurnIn and
+        Inventory.GetFreeInventorySlots() < InventorySlotsLeft and not shouldWaitForBonusBuff then
         State = CharacterState.gcTurnIn
         Dalamud.Log("[FATE] State Change: GCTurnIn")
-    elseif not Dalamud.Log("[FATE] Ready -> TeleportBackToFarmingZone") and Svc.ClientState.TerritoryType ~=  SelectedZone.zoneId then
+        return
+	end
+	
+--TeleportBackToFarmingZone
+    if not Dalamud.Log("[FATE] Ready -> TeleportBackToFarmingZone") and Svc.ClientState.TerritoryType ~=  SelectedZone.zoneId then
         TeleportTo(SelectedZone.aetheryteList[1].aetheryteName)
         return
-    elseif not Dalamud.Log("[FATE] Ready -> SummonChocobo") and ShouldSummonChocobo and GetBuddyTimeRemaining() <= ResummonChocoboTimeLeft and
+	end
+	
+--SummonChocobo
+    if not Dalamud.Log("[FATE] Ready -> SummonChocobo") and ShouldSummonChocobo and GetBuddyTimeRemaining() <= ResummonChocoboTimeLeft and
         (not shouldWaitForBonusBuff or Inventory.GetItemCount(4868) > 0) then
         State = CharacterState.summonChocobo
-    elseif not Dalamud.Log("[FATE] Ready -> NextFate nil") and NextFate == nil then
+        return
+	end
+
+--NextFate
+    if not Dalamud.Log("[FATE] Ready -> NextFate nil") and NextFate == nil then
         if EnableChangeInstance and GetZoneInstance() > 0 and not shouldWaitForBonusBuff then
             State = CharacterState.changingInstances
             Dalamud.Log("[FATE] State Change: ChangingInstances")
@@ -2608,9 +2617,7 @@ function Ready()
             if not Svc.Condition[CharacterCondition.mounted] then
                 Mount()
             end
-            yield("/wait 10")
         end
-        return
     elseif CompanionScriptMode and DidFate and not shouldWaitForBonusBuff then
         if WaitingForFateRewards == nil then
             StopScript = true
@@ -2618,21 +2625,38 @@ function Ready()
         else
             Dalamud.Log("[FATE] Waiting for fate rewards")
         end
-    elseif not Dalamud.Log("[FATE] Ready -> MovingToFate") then -- and ((CurrentFate == nil) or (GetFateProgress(CurrentFate.fateId) == 100) and NextFate ~= nil) then
+    end
+    NextFate = SelectNextFate()
+    if CurrentFate ~= nil and not IsFateActive(CurrentFate.fateObject) then
+        CurrentFate = nil
+    end
+    if CurrentFate == nil then
+        Dalamud.Log("[FATE] CurrentFate is nil")
+    else
+        Dalamud.Log("[FATE] CurrentFate is "..CurrentFate.fateName)
+    end
+    if NextFate == nil then
+        Dalamud.Log("[FATE] NextFate is nil")
+    else
+        Dalamud.Log("[FATE] NextFate is "..NextFate.fateName)
+    end
+    if not Dalamud.Log("[FATE] Ready -> Player.Available") and not Player.Available then
+        return
+    elseif not Dalamud.Log("[FATE] Ready -> MovingToFate") and NextFate ~= nil then
         CurrentFate = NextFate
         SetMapFlag(SelectedZone.zoneId, CurrentFate.position)
         State = CharacterState.moveToFate
         Dalamud.Log("[FATE] State Change: MovingtoFate "..CurrentFate.fateName)
     end
-
-    if not GemAnnouncementLock and (Echo == "All" or Echo == "Gems") then
-        GemAnnouncementLock = true
-        if BicolorGemCount >= 1400 then
-            yield("/echo [FATE] You're almost capped with "..tostring(BicolorGemCount).."/1500 gems! <se.3>")
+--FlyBackToAetheryte
+    if (not Dalamud.Log("[FATE] Ready -> WaitBonusBuff") and NextFate == nil and shouldWaitForBonusBuff) and DownTimeWaitAtNearestAetheryte then
+        if Svc.Targets.Target == nil or GetTargetName() ~= "aetheryte" or GetDistanceToTarget() > 20 then
+            State = CharacterState.flyBackToAetheryte
+            Dalamud.Log("[FATE] State Change: FlyBackToAetheryte")
         else
-            yield("/echo [FATE] Gems: "..tostring(BicolorGemCount).."/1500")
+            yield("/wait 10")
         end
-    end
+	end
 end
 
 
